@@ -11,7 +11,6 @@ If you want to play around with THA3 expressions in a standalone app, see `manua
 #  - improve idle animations
 #    - cosine schedule?
 #    - or perhaps the current ODE approach is better (define instant rate only, based on target state; then integrate)
-#  - add option to server.py to load with float32 or float16, as desired
 #  - PNG sending efficiency?
 
 import atexit
