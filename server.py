@@ -195,7 +195,6 @@ if "talkinghead" in modules:
 
     try:
         import talkinghead.tha3.app.app as talkinghead
-        from talkinghead import *  # TODO: ouch, can we avoid a star-import?
         def launch_talkinghead():
             # mode: choices='The device to use for PyTorch ("cuda" for GPU, "cpu" for CPU).'
             # model: choices=['standard_float', 'separable_float', 'standard_half', 'separable_half'],
