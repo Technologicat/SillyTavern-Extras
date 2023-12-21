@@ -52,7 +52,7 @@ _animator_output_lock = threading.Lock()  # protect from concurrent access to `r
 #
 # Since the plugin might not have been started yet at that time (so the animator instance might not exist),
 # it's better to keep this state in module-level globals rather than in attributes of the animator.
-animation_running = False
+animation_running = False  # used in initial bootup state, and while loading a new image
 current_emotion = "neutral"
 is_talking = False
 global_reload_image = None
