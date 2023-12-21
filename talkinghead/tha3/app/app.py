@@ -420,10 +420,10 @@ class TalkingheadAnimator:
         constant `lambda`.
 
         This is because `step` is the fraction of the *current* difference between `pose` and `target_pose`,
-        which obviously becomes smaller after each repeat.
+        which obviously becomes smaller after each repeat. This is a feature, not a bug!
 
-        Note that this is a kind of history-free rate-based formulation. This needs only the current and target poses,
-        and the step size; there is no need to keep track of e.g. the initial pose or the progress along the trajectory.
+        This is a kind of history-free rate-based formulation, which needs only the current and target poses, and
+        the step size; there is no need to keep track of e.g. the initial pose or the progress along the trajectory.
         """
         # NOTE: This overwrites blinking, sway, talking, and breathing, but that doesn't matter, because we apply this first.
         # The other animation drivers then modify our result.
