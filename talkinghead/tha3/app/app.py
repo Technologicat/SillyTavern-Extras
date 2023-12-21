@@ -49,7 +49,6 @@ global_reload_image = None
 animation_running = False
 is_talking = False
 current_emotion = "neutral"
-current_pose = None
 fps = 0
 
 # Flask setup
@@ -231,6 +230,7 @@ class TalkingheadAnimator:
         self.poser = poser
         self.device = device
 
+        self.current_pose = None
         self.last_blink_timestamp = 0  # TODO: Great idea! We should actually use this.
         self.is_blinked = False  # TODO: Maybe we might need this, too, now that the FPS is acceptable enough that we may need to blink over several frames.
         self.targets = {"head_y_index": 0}
@@ -364,7 +364,6 @@ class TalkingheadAnimator:
         global animation_running
         global initAMI
         global fps
-        global current_pose
 
         if not animation_running:
             return
@@ -381,19 +380,19 @@ class TalkingheadAnimator:
 
         time_render_start = time.time_ns()
 
-        if current_pose is None:  # initialize character pose at plugin startup
-            current_pose = posedict_to_pose(self.emotions[current_emotion])
+        if self.current_pose is None:  # initialize character pose at plugin startup
+            self.current_pose = posedict_to_pose(self.emotions[current_emotion])
 
         emotion_posedict = self.emotions[current_emotion]
-        target_pose = self.apply_emotion_to_pose(emotion_posedict, current_pose)
+        target_pose = self.apply_emotion_to_pose(emotion_posedict, self.current_pose)
 
-        current_pose = self.interpolate_pose(current_pose, target_pose)
-        current_pose = self.animate_blinking(current_pose)
-        current_pose = self.animate_sway(current_pose)
-        current_pose = self.animate_talking(current_pose)
+        self.current_pose = self.interpolate_pose(self.current_pose, target_pose)
+        self.current_pose = self.animate_blinking(self.current_pose)
+        self.current_pose = self.animate_sway(self.current_pose)
+        self.current_pose = self.animate_talking(self.current_pose)
         # TODO: animate breathing
 
-        pose = torch.tensor(current_pose, device=self.device, dtype=self.poser.get_dtype())
+        pose = torch.tensor(self.current_pose, device=self.device, dtype=self.poser.get_dtype())
 
         with torch.no_grad():
             output_image = self.poser.pose(self.source_image, pose)[0].float()  # [0]: model's output index for the full result image
