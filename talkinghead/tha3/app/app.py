@@ -341,15 +341,19 @@ class TalkingheadAnimator:
     def animate_sway(self, pose: List[float]) -> List[float]:
         # TODO: improve sway (currently this overwrites the emotion pose, just like the original version did - but it only touched head_y)
         #  - re-implement sway: just modify the target pose, and let the integrator (`interpolate_pose`) do the actual animation (no need to track start/progress/etc.)
-        #  - target_pose = emotion_pose + alpha * random_pose_for_sway_morphs,
-        #  - clamp to avoid extreme deformation
-        #  - but if the emotion pose is over the clamp limit, it should override the limit. So we want something like:
+        #  - This will also make the animation nonlinear automatically. (By default, a saturating exponential toward target.
+        #    If we want a smooth start, we'll need a ramp-in mechanism to interpolate the target from the current pose to the actual target gradually.
+        #    The nonlinearity automatically takes care of slowing down when the target is approached.)
+        #  - target_pose = emotion_pose + random_pose_for_sway_morphs,
+        #  - clamp the components of the random pose to avoid extreme deformation
+        #  - but if the emotion pose is over the clamp limit, we want to still be able to reach it. So we want something like:
         #      emotion_pose + max_random <= clamp_upper
         #    Rearranging,
         #      max_random <= clamp_upper - emotion_pose
-        #    Because the max should be >= 0, modify this to
+        #    Because the max should be >= 0, we modify this to
         #      max_random = max(0, clamp_upper - emotion_pose)
-        #    This ensures the sway target pose never exceeds clamp_upper, no matter the value of emotion_pose.
+        #    This ensures the sway target pose never exceeds clamp_upper, no matter the value of the morph in emotion_pose.
+        #    When a morph in emotion_pose is over the clamp limit, sway may randomize the value down, but not up.
         #    Similarly for min.
         #  - Simple zeroth-order solution. Would be nicer to *gradually* decrease the max of the random range the farther emotion_pose is from the origin,
         #    i.e. allow some small sway also to the "outside" all the way until emotion_pose is 1 (in which case the morph is at its maximum valid value).
