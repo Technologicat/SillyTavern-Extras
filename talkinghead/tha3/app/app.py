@@ -251,12 +251,12 @@ class TalkingheadAnimator:
         self.current_pose = None
         self.last_blink_timestamp = None
         self.is_blinked = False  # TODO: Maybe we might need this, too, now that the FPS is acceptable enough that we may need to blink over several frames.
-        self.targets = {"head_y_index": 0}
-        self.progress = {"head_y_index": 0}
-        self.direction = {"head_y_index": 1}
-        self.originals = {"head_y_index": 0}  # TODO: what was this for; probably for recording the values from the current emotion, before sway animation?
-        self.forward = {"head_y_index": True}  # Direction of interpolation
-        self.start_values = {"head_y_index": 0}
+        self.targets = {"head_x_index": 0, "head_y_index": 0, "neck_z_index": 0, "body_y_index": 0, "body_z_index": 0}
+        self.progress = {"head_x_index": 0, "head_y_index": 0, "neck_z_index": 0, "body_y_index": 0, "body_z_index": 0}
+        self.direction = {"head_x_index": 1, "head_y_index": 1, "neck_z_index": 1, "body_y_index": 1, "body_z_index": 1}
+        self.originals = {"head_x_index": 0, "head_y_index": 0, "neck_z_index": 0, "body_y_index": 0, "body_z_index": 0}  # TODO: what was this for; probably for recording the values from the current emotion, before sway animation?
+        self.forward = {"head_x_index": True, "head_y_index": True, "neck_z_index": True, "body_y_index": True, "body_z_index": True}  # Direction of interpolation
+        self.start_values = {"head_x_index": 0, "head_y_index": 0, "neck_z_index": 0, "body_y_index": 0, "body_z_index": 0}
 
         self.fps_statistics = FpsStatistics()
 
@@ -339,10 +339,25 @@ class TalkingheadAnimator:
         return new_pose
 
     def animate_sway(self, pose: List[float]) -> List[float]:
-        # TODO: add sway for other axes and body
+        # TODO: improve sway (currently this overwrites the emotion pose, just like the original version did - but it only touched head_y)
+        #  - re-implement sway: just modify the target pose, and let the integrator (`interpolate_pose`) do the actual animation (no need to track start/progress/etc.)
+        #  - target_pose = emotion_pose + alpha * random_pose_for_sway_morphs,
+        #  - clamp to avoid extreme deformation
+        #  - but if the emotion pose is over the clamp limit, it should override the limit. So we want something like:
+        #      emotion_pose + max_random <= clamp_upper
+        #    Rearranging,
+        #      max_random <= clamp_upper - emotion_pose
+        #    Because the max should be >= 0, modify this to
+        #      max_random = max(0, clamp_upper - emotion_pose)
+        #    This ensures the sway target pose never exceeds clamp_upper, no matter the value of emotion_pose.
+        #    Similarly for min.
+        #  - Simple zeroth-order solution. Would be nicer to *gradually* decrease the max of the random range the farther emotion_pose is from the origin,
+        #    i.e. allow some small sway also to the "outside" all the way until emotion_pose is 1 (in which case the morph is at its maximum valid value).
+        #  - sway timing? How often to randomize a new target pose? Maybe every 5-10 seconds?
+        #  - Ideally the clamp limits and sway timing should depend on character, too...
 
         new_pose = list(pose)  # copy
-        MOVEPARTS = ["head_y_index"]
+        MOVEPARTS = ["head_x_index", "head_y_index", "neck_z_index", "body_y_index", "body_z_index"]
         for key in MOVEPARTS:
             idx = posedict_key_to_index[key]
             current_value = pose[idx]
