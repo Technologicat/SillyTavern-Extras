@@ -344,8 +344,8 @@ class TalkingheadAnimator:
         #  - This will also make the animation nonlinear automatically. (By default, a saturating exponential toward target.
         #    If we want a smooth start, we'll need a ramp-in mechanism to interpolate the target from the current pose to the actual target gradually.
         #    The nonlinearity automatically takes care of slowing down when the target is approached.)
-        #  - target_pose = emotion_pose + random_pose_for_sway_morphs,
-        #  - clamp the components of the random pose to avoid extreme deformation
+        #  - target_pose = emotion_pose + random_offset_for_sway_morphs,
+        #  - clamp the components of the random offset to avoid extreme deformation
         #  - but if the emotion pose is over the clamp limit, we want to still be able to reach it. So we want something like:
         #      emotion_pose + max_random <= clamp_upper
         #    Rearranging,
@@ -358,6 +358,7 @@ class TalkingheadAnimator:
         #  - Simple zeroth-order solution. Would be nicer to *gradually* decrease the max of the random range the farther emotion_pose is from the origin,
         #    i.e. allow some small sway also to the "outside" all the way until emotion_pose is 1 (in which case the morph is at its maximum valid value).
         #  - sway timing? How often to randomize a new target pose? Maybe every 5-10 seconds?
+        #    - Since we always know the target emotion pose, we can just re-read it and randomize new offsets.
         #  - Ideally the clamp limits and sway timing should depend on character, too...
 
         new_pose = list(pose)  # copy
