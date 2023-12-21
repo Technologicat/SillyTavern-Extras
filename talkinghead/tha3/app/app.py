@@ -249,7 +249,7 @@ class TalkingheadAnimator:
         self.device = device
 
         self.current_pose = None
-        self.last_blink_timestamp = 0  # TODO: Great idea! We should actually use this.
+        self.last_blink_timestamp = None
         self.is_blinked = False  # TODO: Maybe we might need this, too, now that the FPS is acceptable enough that we may need to blink over several frames.
         self.targets = {"head_y_index": 0}
         self.progress = {"head_y_index": 0}
@@ -300,13 +300,26 @@ class TalkingheadAnimator:
         return new_pose
 
     def animate_blinking(self, pose: List[float]) -> List[float]:
-        # TODO: add smoothly animated blink?
+        # TODO: add a smooth beginning to the blink?
 
-        # If there should be a blink, set the wink morphs to 1; otherwise, use the provided value.
         should_blink = (random.random() <= 0.03)
+
+        # Prevent blinking too fast in succession, and also ensure a blink after a maximum interval
+        # TODO: Idea for the future: allow blinking quickly in succession near the beginning of the "confusion" state. Need to track emotion change timestamp.
+        time_now = time.time_ns()
+        if self.last_blink_timestamp is not None:
+            seconds_since_last_blink = (time_now - self.last_blink_timestamp) / 10**9
+            # 12...20 times per minute, i.e. 5...3 seconds interval
+            if seconds_since_last_blink > 5.0 - random.uniform(0, 1):  # 4...5 seconds
+                should_blink = True
+            elif seconds_since_last_blink < 2.0 + random.uniform(0, 1):  # 2...3 seconds
+                should_blink = False
+
         if not should_blink:
             return pose
+        self.last_blink_timestamp = time_now
 
+        # If there should be a blink, set the wink morphs to 1.
         new_pose = list(pose)  # copy
         for morph_name in ["eye_wink_left_index", "eye_wink_right_index"]:
             idx = posedict_key_to_index[morph_name]
