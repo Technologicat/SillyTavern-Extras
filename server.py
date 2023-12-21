@@ -87,9 +87,9 @@ parser.add_argument(
 )
 parser.add_argument("--talkinghead-gpu", action="store_true", help="Run the talkinghead animation on the GPU (CPU is default)")
 parser.add_argument(
-    "--talkinghead-model", type=str, help="The THA3 model to use. 'float' models are fp32, 'half' are fp16.",
-    required=False, default="separable_half",
-    choices=["standard_float", "separable_float", "standard_half", "separable_half"],
+    "--talkinghead-model", type=str, help="The THA3 model to use. 'float' models are fp32, 'half' are fp16. 'auto' (default) picks fp16 for GPU and fp32 for CPU.",
+    required=False, default="auto",
+    choices=["auto", "standard_float", "separable_float", "standard_half", "separable_half"],
 )
 
 parser.add_argument("--coqui-gpu", action="store_true", help="Run the voice models on the GPU (CPU is default)")
@@ -189,6 +189,9 @@ if "talkinghead" in modules:
     import threading
     mode = "cuda" if args.talkinghead_gpu else "cpu"
     model = args.talkinghead_model
+    if model == "auto":  # default
+        # FP16 boosts the rendering performance by ~1.5x, but is only supported on GPU.
+        model = "separable_half" if args.talkinghead_gpu else "separable_float"
     print(f"Initializing talkinghead pipeline in {mode} mode with model {model}....")
     talkinghead_path = os.path.abspath(os.path.join(os.getcwd(), "talkinghead"))
     sys.path.append(talkinghead_path) # Add the path to the 'tha3' module to the sys.path list
