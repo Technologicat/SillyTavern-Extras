@@ -145,8 +145,15 @@ def result_feed() -> Response:
                 #  - Excessive spamming can DoS the SillyTavern GUI, so there needs to be a rate limit.
                 #  - OTOH, we must constantly send something, or the GUI will lock up waiting.
                 #
-                # Thus, if we have a new frame, send it now. Otherwise wait for a bit.
-                if have_new_frame:
+                # Thus, if we have a new frame, or enough time has elapsed already (slow GPU or running on CPU), send it now. Otherwise wait for a bit.
+                if last_update_time is not None:
+                    time_now = time.time_ns()
+                    elapsed_time = time_now - last_update_time
+                    past_frame_deadline = (elapsed_time / 10**9) > 0.04
+                else:
+                    past_frame_deadline = True  # nothing rendered yet
+
+                if have_new_frame or past_frame_deadline:
                     yield (b"--frame\r\n"
                            b"Content-Type: image/png\r\n\r\n" + image_bytes + b"\r\n")
 
