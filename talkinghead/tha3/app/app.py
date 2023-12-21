@@ -46,17 +46,16 @@ logger = logging.getLogger(__name__)
 talkinghead_basedir = "talkinghead"
 
 global_animator_instance = None
-_animator_output_lock = threading.Lock()
-
-global_reload_image = None
+_animator_output_lock = threading.Lock()  # protect from concurrent access to `result_image` and the `frame_ready` flag.
 
 # These need to be written to by the API functions.
 #
 # Since the plugin might not have been started yet at that time (so the animator instance might not exist),
 # it's better to keep this state in module-level globals rather than in attributes of the animator.
 animation_running = False
-is_talking = False
 current_emotion = "neutral"
+is_talking = False
+global_reload_image = None
 
 # --------------------------------------------------------------------------------
 # API
@@ -191,7 +190,7 @@ def talkinghead_load_file(stream) -> str:
     except PIL.Image.UnidentifiedImageError:
         logger.warning("Could not load input image from stream, loading blank")
         full_path = os.path.join(os.getcwd(), os.path.normpath(os.path.join(talkinghead_basedir, "tha3", "images", "inital.png")))
-        global_animator_instance.load_image(full_path)
+        global_reload_image = PIL.Image.open(full_path)
     finally:
         animation_running = True
     return "OK"
@@ -374,13 +373,12 @@ class TalkingheadAnimator:
         if not animation_running:
             return
 
-        # Skip rendering, if no one has retrieved the previous frame yet.
+        # If no one has retrieved the previous frame yet, do not render a new one.
         if self.frame_ready:
             return
 
         if global_reload_image is not None:
             self.load_image()
-            return  # TODO: do we really need to return here, we could just proceed?
         if self.source_image is None:
             return
 
@@ -437,14 +435,14 @@ class TalkingheadAnimator:
         """Load the image file at `file_path`.
 
         Except, if `global_reload_image is not None`, use the global reload image data instead.
+        In that case `file_path` is not used.
+
+        When done, this always sets `global_reload_image` to `None`.
         """
         global global_reload_image
 
-        if global_reload_image is not None:
-            file_path = "global_reload_image"
-
         try:
-            if file_path == "global_reload_image":
+            if global_reload_image is not None:
                 pil_image = global_reload_image
             else:
                 pil_image = resize_PIL_image(
