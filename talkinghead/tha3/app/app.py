@@ -204,8 +204,6 @@ def launch(device: str, model: str) -> Union[None, NoReturn]:
     model: one of the folder names inside "talkinghead/tha3/models/"
     """
     global global_animator_instance
-    global initAMI  # TODO: initAREYOU? See if we still need this - the idea seems to be to stop animation until the first image is loaded.
-    initAMI = True
 
     try:
         # If the animator already exists, clean it up first
@@ -372,10 +370,6 @@ class TalkingheadAnimator:
 
         If the previous rendered frame has not been retrieved yet, do nothing.
         """
-
-        global animation_running
-        global initAMI
-
         if not animation_running:
             return
 
@@ -426,10 +420,6 @@ class TalkingheadAnimator:
         with _animator_output_lock:
             self.result_image = output_image_numpy
             self.frame_ready = True
-
-        if initAMI:  # If the models are just now initalized stop animation to save
-            animation_running = False
-            initAMI = False
 
         # Log the FPS counter in 5-second intervals.
         if self.last_report_time is None or time_now - self.last_report_time > 5e9:
