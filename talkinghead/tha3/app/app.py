@@ -40,23 +40,30 @@ from tha3.app.util import posedict_keys, posedict_key_to_index, load_emotion_pre
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# --------------------------------------------------------------------------------
 # Global variables
-# TODO: we could move many of these into TalkingheadAnimator, and just keep a reference to that as global.
-global_basedir = "talkinghead"
+
+talkinghead_basedir = "talkinghead"
+
 global_animator_instance = None
 _animator_output_lock = threading.Lock()
+
 global_reload_image = None
 
+# These need to be written to by the API functions.
+#
+# Since the plugin might not have been started yet at that time (so the animator instance might not exist),
+# it's better to keep this state in module-level globals rather than in attributes of the animator.
 animation_running = False
 is_talking = False
 current_emotion = "neutral"
 
+# --------------------------------------------------------------------------------
+# API
+
 # Flask setup
 app = Flask(__name__)
 CORS(app)
-
-# --------------------------------------------------------------------------------
-# API
 
 def setEmotion(_emotion: Dict[str, float]) -> None:
     """Set the current emotion of the character based on sentiment analysis results.
@@ -183,7 +190,7 @@ def talkinghead_load_file(stream) -> str:
         global_reload_image = PIL.Image.open(io.BytesIO(img_data.getvalue()))  # Set the global_reload_image to a copy of the image data
     except PIL.Image.UnidentifiedImageError:
         logger.warning("Could not load input image from stream, loading blank")
-        full_path = os.path.join(os.getcwd(), os.path.normpath(os.path.join(global_basedir, "tha3", "images", "inital.png")))
+        full_path = os.path.join(os.getcwd(), os.path.normpath(os.path.join(talkinghead_basedir, "tha3", "images", "inital.png")))
         global_animator_instance.load_image(full_path)
     finally:
         animation_running = True
@@ -202,11 +209,11 @@ def launch(device: str, model: str) -> Union[None, NoReturn]:
     initAMI = True
 
     try:
-        poser = load_poser(model, device, modelsdir=os.path.join(global_basedir, "tha3", "models"))
+        poser = load_poser(model, device, modelsdir=os.path.join(talkinghead_basedir, "tha3", "models"))
         global_animator_instance = TalkingheadAnimator(poser, device)
 
         # Load initial blank character image
-        full_path = os.path.join(os.getcwd(), os.path.normpath(os.path.join(global_basedir, "tha3", "images", "inital.png")))
+        full_path = os.path.join(os.getcwd(), os.path.normpath(os.path.join(talkinghead_basedir, "tha3", "images", "inital.png")))
         global_animator_instance.load_image(full_path)
 
         global_animator_instance.start()
