@@ -146,10 +146,12 @@ def result_feed() -> Response:
                 #  - OTOH, we must constantly send something, or the GUI will lock up waiting.
                 #
                 # Thus, if we have a new frame, or enough time has elapsed already (slow GPU or running on CPU), send it now. Otherwise wait for a bit.
+                # Target an acceptable anime frame rate of 25 FPS.
+                TARGET_TIME_SEC = 0.04  # 1/25
                 if last_update_time is not None:
                     time_now = time.time_ns()
                     elapsed_time = time_now - last_update_time
-                    past_frame_deadline = (elapsed_time / 10**9) > 0.04
+                    past_frame_deadline = (elapsed_time / 10**9) > TARGET_TIME_SEC
                 else:
                     past_frame_deadline = True  # nothing rendered yet
 
@@ -165,10 +167,9 @@ def result_feed() -> Response:
                         fps_statistics.add_fps(fps)
                     last_update_time = time_now
                 else:
-                    # Target an acceptable anime frame rate of 25 FPS.
+                    # We don't measure pack/send time, so this is not exact. In practice the resulting framerate is slightly under the target (24 vs. 25 FPS).
                     # Note the animator runs in a different thread, so it can render while we are waiting.
-                    # We don't measure pack/send time, so this is not exact. In practice we get ~24 FPS.
-                    time.sleep(0.04)
+                    time.sleep(TARGET_TIME_SEC)
 
                 # Log the FPS counter in 5-second intervals.
                 if last_report_time is None or time_now - last_report_time > 5e9:
