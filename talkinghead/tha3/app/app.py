@@ -410,9 +410,17 @@ class TalkingheadAnimator:
         new_pose[idx] = math.sin(cycle_pos * math.pi)**2  # 0 ... 1 ... 0, smoothly, with slow start and end, fast middle
         return new_pose
 
-    def interpolate_pose(self, pose: List[float], target_pose: List[float], step=0.1) -> List[float]:
-        # TODO: ignore sway?
-        # TODO: ignore breathing?
+    def interpolate_pose(self, pose: List[float], target_pose: List[float], step: float = 0.1) -> List[float]:
+        """Interpolate from `pose` toward `target_pose`.
+
+        `step`: [0, 1]; how far toward `target_pose` to interpolate. 0 is fully `pose`, 1 is fully `target_pose`.
+
+        Note that applying this repeatedly to the result, while keeping `target_pose` constant, causes the
+        current pose to approach `target_pose` on a saturating exponential trajectory, like `1 - exp(-lambda * t)`
+        for some constant `lambda`.
+        """
+        # NOTE: This overwrites blinking, sway, talking, and breathing, but that doesn't matter, because we apply this first.
+        # The other animation drivers then modify our result.
         new_pose = list(pose)  # copy
         for idx, key in enumerate(posedict_keys):
             # # We animate blinking *after* interpolating the pose, so when blinking, the eyes close instantly.
