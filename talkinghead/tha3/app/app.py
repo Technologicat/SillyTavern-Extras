@@ -16,6 +16,7 @@ If you want to play around with THA3 expressions in a standalone app, see `manua
 import atexit
 import io
 import logging
+import math
 import os
 import random
 import sys
@@ -257,6 +258,8 @@ class TalkingheadAnimator:
         self.originals = {"head_x_index": 0, "head_y_index": 0, "neck_z_index": 0, "body_y_index": 0, "body_z_index": 0}  # TODO: what was this for; probably for recording the values from the current emotion, before sway animation?
         self.forward = {"head_x_index": True, "head_y_index": True, "neck_z_index": True, "body_y_index": True, "body_z_index": True}  # Direction of interpolation
         self.start_values = {"head_x_index": 0, "head_y_index": 0, "neck_z_index": 0, "body_y_index": 0, "body_z_index": 0}
+        self.breathing_epoch = time.time_ns()
+        self.breathing_cycle_length = 4.0  # seconds
 
         self.fps_statistics = FpsStatistics()
 
@@ -391,6 +394,20 @@ class TalkingheadAnimator:
             new_pose[idx] = new_value
         return new_pose
 
+    def animate_breathing(self, pose: List[float]) -> List[float]:
+        time_now = time.time_ns()
+        t = (time_now - self.breathing_epoch) / 10**9  # seconds since breathing-epoch
+        cycle_pos = t / self.breathing_cycle_length  # number of cycles since breathing-epoch
+        if cycle_pos > 1.0:  # prevent overflow in long sessions
+            self.breathing_epoch = time_now  # TODO: be more accurate here, should sync to a whole cycle
+        cycle_pos = cycle_pos - float(int(cycle_pos))  # fractional part
+
+        new_pose = list(pose)  # copy
+        idx = posedict_key_to_index["breathing_index"]
+        # TODO: improve breathing animation?
+        new_pose[idx] = math.sin(cycle_pos * math.pi)**2  # 0 ... 1 ... 0, smoothly, with slow start and end, fast middle
+        return new_pose
+
     def interpolate_pose(self, pose: List[float], target_pose: List[float], step=0.1) -> List[float]:
         # TODO: ignore sway?
         # TODO: ignore breathing?
@@ -435,7 +452,7 @@ class TalkingheadAnimator:
         self.current_pose = self.animate_blinking(self.current_pose)
         self.current_pose = self.animate_sway(self.current_pose)
         self.current_pose = self.animate_talking(self.current_pose)
-        # TODO: animate breathing
+        self.current_pose = self.animate_breathing(self.current_pose)
 
         pose = torch.tensor(self.current_pose, device=self.device, dtype=self.poser.get_dtype())
 
