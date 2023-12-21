@@ -22,7 +22,7 @@ import sys
 import time
 import numpy as np
 import threading
-from typing import Dict, List, NoReturn, Union
+from typing import Dict, List, NoReturn, Optional, Union
 
 import PIL
 
@@ -41,10 +41,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Global variables
-# TODO: we could move many of these into TalkingheadLive, and just keep a reference to that as global.
-global_instance = None
+# TODO: we could move many of these into TalkingheadAnimator, and just keep a reference to that as global.
+global_animator = None
 global_basedir = "talkinghead"
-global_result_image = None
+_animator_output_lock = threading.Lock()
 global_reload_image = None
 animation_running = False
 is_talking = False
@@ -103,23 +103,70 @@ def stop_talking() -> str:
 def result_feed() -> Response:
     """Return a Flask `Response` that repeatedly yields the current image as 'image/png'."""
     def generate():
+        last_update_time = None
+        last_report_time = None
+        fps_statistics = FpsStatistics()
+        image_bytes = None
+
         while True:
-            if global_result_image is not None:
+            # Retrieve a new frame from the animator if available.
+            have_new_frame = False
+            with _animator_output_lock:
+                if global_animator.frame_ready:
+                    image_rgba = global_animator.result_image
+                    try:
+                        pil_image = PIL.Image.fromarray(np.uint8(image_rgba[:, :, :3]))
+                        if image_rgba.shape[2] == 4:
+                            alpha_channel = image_rgba[:, :, 3]
+                            pil_image.putalpha(PIL.Image.fromarray(np.uint8(alpha_channel)))
+                        global_animator.frame_ready = False  # Animation frame consumed; tell the animator it can begin rendering the next one.
+                        have_new_frame = True
+                    except Exception as exc:
+                        logger.error(exc)
+
+            # Pack the new animation frame for sending.
+            if have_new_frame:
                 try:
-                    rgb_image = global_result_image[:, :, [2, 1, 0]]  # Swap B and R channels
-                    pil_image = PIL.Image.fromarray(np.uint8(rgb_image))  # Convert to PIL Image
-                    if global_result_image.shape[2] == 4:  # Check if there is an alpha channel present
-                        alpha_channel = global_result_image[:, :, 3]  # Extract alpha channel
-                        pil_image.putalpha(PIL.Image.fromarray(np.uint8(alpha_channel)))  # Set alpha channel in the PIL Image
                     buffer = io.BytesIO()  # Save as PNG with RGBA mode
                     pil_image.save(buffer, format="PNG")
                     image_bytes = buffer.getvalue()
                 except Exception as exc:
-                    logger.error(f"Error when trying to write image: {exc}")
-                yield (b"--frame\r\n"  # Send the PNG image (last available in case of error)
-                       b"Content-Type: image/png\r\n\r\n" + image_bytes + b"\r\n")
-            else:
+                    logger.error(f"Cannot write image to buffer: {exc}")
+                    raise
+
+            # Send the animation frame.
+            if image_bytes is not None:
+                # How often should we send?
+                #  - Excessive spamming can DoS the SillyTavern GUI, so there needs to be a rate limit.
+                #  - OTOH, we must constantly send something, or the GUI will lock up waiting.
+                #
+                # Thus, if we have a new frame, send it now. Otherwise wait for a bit.
+                if have_new_frame:
+                    yield (b"--frame\r\n"
+                           b"Content-Type: image/png\r\n\r\n" + image_bytes + b"\r\n")
+
+                    # Update the FPS counter, measuring the time between network sends.
+                    time_now = time.time_ns()
+                    if last_update_time is not None:
+                        elapsed_time = time_now - last_update_time
+                        fps = 1.0 / (elapsed_time / 10**9)
+                        fps_statistics.add_fps(fps)
+                    last_update_time = time_now
+                else:
+                    # Target an acceptable anime frame rate of 25 FPS.
+                    # Note the animator runs in a different thread, so it can render while we are waiting.
+                    # We don't measure pack/send time, so this is not exact. In practice we get ~24 FPS.
+                    time.sleep(0.04)
+
+                # Log the FPS counter in 5-second intervals.
+                if last_report_time is None or time_now - last_report_time > 5e9:
+                    trimmed_fps = round(fps_statistics.get_average_fps(), 1)
+                    logger.info("rate-limited network FPS: {:.1f}".format(trimmed_fps))
+                    last_report_time = time_now
+
+            else:  # first frame not yet available, animator still booting
                 time.sleep(0.1)
+
     return Response(generate(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 # TODO: the input is a flask.request.file.stream; what's the type of that?
@@ -138,7 +185,7 @@ def talkinghead_load_file(stream) -> str:
     except PIL.Image.UnidentifiedImageError:
         logger.warning("Could not load input image from stream, loading blank")
         full_path = os.path.join(os.getcwd(), os.path.normpath(os.path.join(global_basedir, "tha3", "images", "inital.png")))
-        global_instance.load_image(full_path)
+        global_animator.load_image(full_path)
     finally:
         animation_running = True
     return "OK"
@@ -151,19 +198,19 @@ def launch(device: str, model: str) -> Union[None, NoReturn]:
     device: "cpu" or "cuda"
     model: one of the folder names inside "talkinghead/tha3/models/"
     """
-    global global_instance
+    global global_animator
     global initAMI  # TODO: initAREYOU? See if we still need this - the idea seems to be to stop animation until the first image is loaded.
     initAMI = True
 
     try:
         poser = load_poser(model, device, modelsdir=os.path.join(global_basedir, "tha3", "models"))
-        global_instance = TalkingheadLive(poser, device)
+        global_animator = TalkingheadAnimator(poser, device)
 
         # Load initial blank character image
         full_path = os.path.join(os.getcwd(), os.path.normpath(os.path.join(global_basedir, "tha3", "images", "inital.png")))
-        global_instance.load_image(full_path)
+        global_animator.load_image(full_path)
 
-        global_instance.start()
+        global_animator.start()
 
     except RuntimeError as exc:
         logger.error(exc)
@@ -177,7 +224,7 @@ def convert_linear_to_srgb(image: torch.Tensor) -> torch.Tensor:
     rgb_image = torch_linear_to_srgb(image[0:3, :, :])
     return torch.cat([rgb_image, image[3:4, :, :]], dim=0)
 
-class TalkingheadLive:
+class TalkingheadAnimator:
     """uWu Waifu"""
 
     def __init__(self, poser: Poser, device: torch.device):
@@ -195,8 +242,9 @@ class TalkingheadLive:
 
         self.fps_statistics = FpsStatistics()
 
-        self.torch_source_image = None
-        self.last_update_time = None
+        self.source_image: Optional[torch.tensor] = None
+        self.result_image: Optional[np.array] = None
+        self.frame_ready = False
         self.last_report_time = None
 
         self.emotions, self.emotion_names = load_emotion_presets(os.path.join("talkinghead", "emotions"))
@@ -204,14 +252,11 @@ class TalkingheadLive:
     def start(self) -> None:
         """Start the animation thread."""
         self._terminated = False
-        def manage_animation_update():
+        def animation_update():
             while not self._terminated:
-                # TODO: add a configurable FPS limiter (take a parameter in `__init__`; populate it from cli args in `server.py`)
-                #   - should sleep for `max(eps, frame_target_ms - render_average_ms)`, where `eps = 0.01`, so that the next frame is ready in time
-                #     (get render_average_ms from FPS counter; sanity check for nonsense value)
                 self.update_result_image_bitmap()
-                time.sleep(0.01)
-        self.animation_thread = threading.Thread(target=manage_animation_update, daemon=True)
+                time.sleep(0.01)  # rate-limit the renderer to 100 FPS maximum (this could be adjusted later)
+        self.animation_thread = threading.Thread(target=animation_update, daemon=True)
         self.animation_thread.start()
         atexit.register(self.exit)
 
@@ -221,6 +266,7 @@ class TalkingheadLive:
         Called automatically when the process exits.
         """
         self._terminated = True
+        self.animation_thread.join()
 
     def apply_emotion_to_pose(self, emotion_posedict: Dict[str, float], pose: List[float]) -> List[float]:
         """Copy all morphs except breathing from `emotion_posedict` to `pose`.
@@ -310,69 +356,77 @@ class TalkingheadLive:
         return new_pose
 
     def update_result_image_bitmap(self) -> None:
-        """Render an animation frame."""
+        """Render an animation frame.
+
+        If the previous rendered frame has not been retrieved yet, do nothing.
+        """
 
         global animation_running
         global initAMI
-        global global_result_image
         global fps
         global current_pose
 
         if not animation_running:
             return
 
-        try:
-            if global_reload_image is not None:
-                self.load_image()
-                return  # TODO: do we really need to return here, we could just proceed?
-            if self.torch_source_image is None:
-                return
-            if current_pose is None:  # initialize character pose at plugin startup
-                current_pose = posedict_to_pose(self.emotions[current_emotion])
+        # Skip rendering, if no one has retrieved the previous frame yet.
+        if self.frame_ready:
+            return
 
-            emotion_posedict = self.emotions[current_emotion]
-            target_pose = self.apply_emotion_to_pose(emotion_posedict, current_pose)
+        if global_reload_image is not None:
+            self.load_image()
+            return  # TODO: do we really need to return here, we could just proceed?
+        if self.source_image is None:
+            return
 
-            current_pose = self.interpolate_pose(current_pose, target_pose)
-            current_pose = self.animate_blinking(current_pose)
-            current_pose = self.animate_sway(current_pose)
-            current_pose = self.animate_talking(current_pose)
-            # TODO: animate breathing
+        time_render_start = time.time_ns()
 
-            pose = torch.tensor(current_pose, device=self.device, dtype=self.poser.get_dtype())
+        if current_pose is None:  # initialize character pose at plugin startup
+            current_pose = posedict_to_pose(self.emotions[current_emotion])
 
-            with torch.no_grad():
-                output_image = self.poser.pose(self.torch_source_image, pose)[0].float()
-                output_image = convert_linear_to_srgb((output_image + 1.0) / 2.0)
+        emotion_posedict = self.emotions[current_emotion]
+        target_pose = self.apply_emotion_to_pose(emotion_posedict, current_pose)
 
-                c, h, w = output_image.shape
-                output_image = (255.0 * torch.transpose(output_image.reshape(c, h * w), 0, 1)).reshape(h, w, c).byte()
+        current_pose = self.interpolate_pose(current_pose, target_pose)
+        current_pose = self.animate_blinking(current_pose)
+        current_pose = self.animate_sway(current_pose)
+        current_pose = self.animate_talking(current_pose)
+        # TODO: animate breathing
 
-            numpy_image = output_image.detach().cpu().numpy()
-            numpy_image_bgra = numpy_image[:, :, [2, 1, 0, 3]]  # Convert color channels from RGB to BGR and keep alpha channel
-            global_result_image = numpy_image_bgra
+        pose = torch.tensor(current_pose, device=self.device, dtype=self.poser.get_dtype())
 
-            # Update FPS counter
-            time_now = time.time_ns()
-            if self.last_update_time is not None:
-                elapsed_time = time_now - self.last_update_time
-                fps = 1.0 / (elapsed_time / 10**9)
+        with torch.no_grad():
+            output_image = self.poser.pose(self.source_image, pose)[0].float()  # [0]: model's output index for the full result image
+            output_image = convert_linear_to_srgb((output_image + 1.0) / 2.0)
 
-                if self.torch_source_image is not None:
-                    self.fps_statistics.add_fps(fps)
-            self.last_update_time = time_now
+            c, h, w = output_image.shape
+            output_image = (255.0 * torch.transpose(output_image.reshape(c, h * w), 0, 1)).reshape(h, w, c).byte()
+            output_image_numpy = output_image.detach().cpu().numpy()
 
-            if initAMI:  # If the models are just now initalized stop animation to save
-                animation_running = False
-                initAMI = False
+        # Update FPS counter, measuring animation render time only.
+        #
+        # This says how fast the renderer *can* run on the current hardware;
+        # note we don't actually render more frames than the network can consume.
+        time_now = time.time_ns()
+        if self.source_image is not None:
+            elapsed_time = time_now - time_render_start
+            fps = 1.0 / (elapsed_time / 10**9)
+            self.fps_statistics.add_fps(fps)
 
-            if self.last_report_time is None or time_now - self.last_report_time > 5e9:
-                trimmed_fps = round(self.fps_statistics.get_average_fps(), 1)
-                logger.info("update_result_image_bitmap: FPS: {:.1f}".format(trimmed_fps))
-                self.last_report_time = time_now
+        # Set the new rendered frame as the output image, and mark the frame as ready for the network thread.
+        with _animator_output_lock:
+            self.result_image = output_image_numpy
+            self.frame_ready = True
 
-        except KeyboardInterrupt:
-            pass
+        if initAMI:  # If the models are just now initalized stop animation to save
+            animation_running = False
+            initAMI = False
+
+        # Log the FPS counter in 5-second intervals.
+        if self.last_report_time is None or time_now - self.last_report_time > 5e9:
+            trimmed_fps = round(self.fps_statistics.get_average_fps(), 1)
+            logger.info("available render FPS: {:.1f}".format(trimmed_fps))
+            self.last_report_time = time_now
 
     def load_image(self, file_path=None) -> None:
         """Load the image file at `file_path`.
@@ -402,9 +456,9 @@ class TalkingheadLive:
 
             if pil_image.mode != "RGBA":
                 logger.error("load_image: image must have alpha channel")
-                self.torch_source_image = None
+                self.source_image = None
             else:
-                self.torch_source_image = extract_pytorch_image_from_PIL_image(pil_image) \
+                self.source_image = extract_pytorch_image_from_PIL_image(pil_image) \
                     .to(self.device).to(self.poser.get_dtype())
 
         except Exception as exc:
