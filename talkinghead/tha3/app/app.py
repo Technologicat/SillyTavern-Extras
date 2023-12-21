@@ -44,7 +44,6 @@ logger = logging.getLogger(__name__)
 # TODO: we could move many of these into TalkingheadLive, and just keep a reference to that as global.
 global_instance = None
 global_basedir = "talkinghead"
-global_source_image = None
 global_result_image = None
 global_reload_image = None
 animation_running = False
@@ -380,7 +379,6 @@ class TalkingheadLive:
 
         Except, if `global_reload_image is not None`, use the global reload image data instead.
         """
-        global global_source_image
         global global_reload_image
 
         if global_reload_image is not None:
@@ -408,8 +406,6 @@ class TalkingheadLive:
             else:
                 self.torch_source_image = extract_pytorch_image_from_PIL_image(pil_image) \
                     .to(self.device).to(self.poser.get_dtype())
-
-            global_source_image = self.torch_source_image
 
         except Exception as exc:
             logger.error(f"load_image: {exc}")
