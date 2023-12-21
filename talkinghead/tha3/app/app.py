@@ -362,6 +362,8 @@ class TalkingheadAnimator:
         #    i.e. allow some small sway also to the "outside" all the way until emotion_pose is 1 (in which case the morph is at its maximum valid value).
         #  - sway timing? How often to randomize a new target pose? Maybe every 5-10 seconds?
         #    - Since we always know the target emotion pose, we can just re-read it and randomize new offsets.
+        #  - may also need some micro-sway on top of the sway target pose to look more believable? (small random modification every few frames,
+        #    at a small constant clamp range)
         #  - Ideally the clamp limits and sway timing should depend on character, too...
 
         new_pose = list(pose)  # copy
