@@ -42,14 +42,14 @@ logger = logging.getLogger(__name__)
 
 # Global variables
 # TODO: we could move many of these into TalkingheadAnimator, and just keep a reference to that as global.
-global_animator = None
 global_basedir = "talkinghead"
+global_animator_instance = None
 _animator_output_lock = threading.Lock()
 global_reload_image = None
+
 animation_running = False
 is_talking = False
 current_emotion = "neutral"
-fps = 0
 
 # Flask setup
 app = Flask(__name__)
@@ -111,14 +111,14 @@ def result_feed() -> Response:
             # Retrieve a new frame from the animator if available.
             have_new_frame = False
             with _animator_output_lock:
-                if global_animator.frame_ready:
-                    image_rgba = global_animator.result_image
+                if global_animator_instance.frame_ready:
+                    image_rgba = global_animator_instance.result_image
                     try:
                         pil_image = PIL.Image.fromarray(np.uint8(image_rgba[:, :, :3]))
                         if image_rgba.shape[2] == 4:
                             alpha_channel = image_rgba[:, :, 3]
                             pil_image.putalpha(PIL.Image.fromarray(np.uint8(alpha_channel)))
-                        global_animator.frame_ready = False  # Animation frame consumed; tell the animator it can begin rendering the next one.
+                        global_animator_instance.frame_ready = False  # Animation frame consumed; tell the animator it can begin rendering the next one.
                         have_new_frame = True
                     except Exception as exc:
                         logger.error(exc)
@@ -184,7 +184,7 @@ def talkinghead_load_file(stream) -> str:
     except PIL.Image.UnidentifiedImageError:
         logger.warning("Could not load input image from stream, loading blank")
         full_path = os.path.join(os.getcwd(), os.path.normpath(os.path.join(global_basedir, "tha3", "images", "inital.png")))
-        global_animator.load_image(full_path)
+        global_animator_instance.load_image(full_path)
     finally:
         animation_running = True
     return "OK"
@@ -197,19 +197,19 @@ def launch(device: str, model: str) -> Union[None, NoReturn]:
     device: "cpu" or "cuda"
     model: one of the folder names inside "talkinghead/tha3/models/"
     """
-    global global_animator
+    global global_animator_instance
     global initAMI  # TODO: initAREYOU? See if we still need this - the idea seems to be to stop animation until the first image is loaded.
     initAMI = True
 
     try:
         poser = load_poser(model, device, modelsdir=os.path.join(global_basedir, "tha3", "models"))
-        global_animator = TalkingheadAnimator(poser, device)
+        global_animator_instance = TalkingheadAnimator(poser, device)
 
         # Load initial blank character image
         full_path = os.path.join(os.getcwd(), os.path.normpath(os.path.join(global_basedir, "tha3", "images", "inital.png")))
-        global_animator.load_image(full_path)
+        global_animator_instance.load_image(full_path)
 
-        global_animator.start()
+        global_animator_instance.start()
 
     except RuntimeError as exc:
         logger.error(exc)
@@ -363,7 +363,6 @@ class TalkingheadAnimator:
 
         global animation_running
         global initAMI
-        global fps
 
         if not animation_running:
             return
@@ -402,10 +401,10 @@ class TalkingheadAnimator:
             output_image = (255.0 * torch.transpose(output_image.reshape(c, h * w), 0, 1)).reshape(h, w, c).byte()
             output_image_numpy = output_image.detach().cpu().numpy()
 
-        # Update FPS counter, measuring animation render time only.
+        # Update FPS counter, measuring animation frame render time only.
         #
         # This says how fast the renderer *can* run on the current hardware;
-        # note we don't actually render more frames than the network can consume.
+        # note we don't actually render more frames than the client consumes.
         time_now = time.time_ns()
         if self.source_image is not None:
             elapsed_time = time_now - time_render_start
