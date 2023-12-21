@@ -415,9 +415,15 @@ class TalkingheadAnimator:
 
         `step`: [0, 1]; how far toward `target_pose` to interpolate. 0 is fully `pose`, 1 is fully `target_pose`.
 
-        Note that applying this repeatedly to the result, while keeping `target_pose` constant, causes the
-        current pose to approach `target_pose` on a saturating exponential trajectory, like `1 - exp(-lambda * t)`
-        for some constant `lambda`.
+        Note that looping back the output as `pose`, while keeping `target_pose` constant, causes the current pose
+        to approach `target_pose` on a saturating exponential trajectory, like `1 - exp(-lambda * t)`, for some
+        constant `lambda`.
+
+        This is because `step` is the fraction of the *current* difference between `pose` and `target_pose`,
+        which obviously becomes smaller after each repeat.
+
+        Note that this is a kind of history-free rate-based formulation. This needs only the current and target poses,
+        and the step size; there is no need to keep track of e.g. the initial pose or the progress along the trajectory.
         """
         # NOTE: This overwrites blinking, sway, talking, and breathing, but that doesn't matter, because we apply this first.
         # The other animation drivers then modify our result.
