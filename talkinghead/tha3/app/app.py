@@ -208,6 +208,12 @@ def launch(device: str, model: str) -> Union[None, NoReturn]:
     initAMI = True
 
     try:
+        # If the animator already exists, clean it up first
+        if global_animator_instance is not None:
+            logger.info(f"launch: relaunching on device {device} with model {model}")
+            global_animator_instance.exit()
+            global_animator_instance = None
+
         poser = load_poser(model, device, modelsdir=os.path.join(talkinghead_basedir, "tha3", "models"))
         global_animator_instance = TalkingheadAnimator(poser, device)
 
