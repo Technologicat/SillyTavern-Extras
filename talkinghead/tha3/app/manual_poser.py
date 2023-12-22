@@ -973,23 +973,47 @@ class MainFrame(wx.Frame):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="THA 3 Manual Poser. Pose a character image manually. Useful for generating static expression images.")
-    parser.add_argument("--model",
-                        type=str,
-                        required=False,
-                        default="separable_float",
-                        choices=["standard_float", "separable_float", "standard_half", "separable_half"],
-                        help="The model to use. 'float' means fp32, 'half' means fp16.")
     parser.add_argument("--device",
                         type=str,
                         required=False,
                         default="cuda",
                         choices=["cpu", "cuda"],
                         help='The device to use for PyTorch ("cuda" for GPU, "cpu" for CPU).')
+    parser.add_argument("--model",
+                        type=str,
+                        required=False,
+                        default="separable_float",
+                        choices=["standard_float", "separable_float", "standard_half", "separable_half"],
+                        help="The model to use. 'float' means fp32, 'half' means fp16.")
+    parser.add_argument("--models",
+                        type=str,
+                        help="If THA3 models are not yet installed, use the given HuggingFace repository to install them.",
+                        default="OktayAlpk/talking-head-anime-3")
     args = parser.parse_args()
+
+    # Install the THA3 models if needed
+    modelsdir = os.path.join(os.getcwd(), "tha3", "models")
+    if not os.path.exists(modelsdir):
+        # API:
+        #   https://huggingface.co/docs/huggingface_hub/en/guides/download
+        try:
+            from huggingface_hub import snapshot_download
+        except ImportError:
+            raise ImportError(
+                "You need to install huggingface_hub to install talkinghead models automatically. "
+                "See https://pypi.org/project/huggingface-hub/ for installation."
+            )
+        os.makedirs(modelsdir, exist_ok=True)
+        print(f"THA3 models not yet installed. Installing from {args.talkinghead_models} into tha3/models.")
+        # Installing with symlinks would be generally better, but MS Windows support for symlinks is not optimal,
+        # so for maximal compatibility we avoid them. The drawback of installing directly as plain files is that
+        # if multiple programs need to download THA3, they will do so separately. But THA3 is rather rare, so in
+        # practice this is unlikely to be an issue.
+        snapshot_download(repo_id=args.talkinghead_models, local_dir=modelsdir, local_dir_use_symlinks=False)
 
     try:
         device = torch.device(args.device)
-        poser = load_poser(args.model, device, modelsdir="tha3/models")
+        poser = load_poser(args.model, device, modelsdir=modelsdir)
     except RuntimeError as e:
         logger.error(e)
         sys.exit()
