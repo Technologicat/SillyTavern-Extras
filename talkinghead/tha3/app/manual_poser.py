@@ -1017,7 +1017,7 @@ if __name__ == "__main__":
         poser = load_poser(args.model, device, modelsdir=modelsdir)
     except RuntimeError as e:
         logger.error(e)
-        sys.exit()
+        sys.exit(255)
 
     # Create the "talkinghead/output" directory if it doesn't exist. This is our default save location.
     p = pathlib.Path("output").expanduser().resolve()
