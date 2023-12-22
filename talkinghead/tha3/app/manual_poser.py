@@ -986,8 +986,9 @@ if __name__ == "__main__":
                         choices=["standard_float", "separable_float", "standard_half", "separable_half"],
                         help="The model to use. 'float' means fp32, 'half' means fp16.")
     parser.add_argument("--models",
+                        metavar="HFREPO",
                         type=str,
-                        help="If THA3 models are not yet installed, use the given HuggingFace repository to install them.",
+                        help="If THA3 models are not yet installed, use the given HuggingFace repository to install them. Defaults to OktayAlpk/talking-head-anime-3.",
                         default="OktayAlpk/talking-head-anime-3")
     args = parser.parse_args()
 

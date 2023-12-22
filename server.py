@@ -92,7 +92,8 @@ parser.add_argument(
     choices=["auto", "standard_float", "separable_float", "standard_half", "separable_half"],
 )
 parser.add_argument(
-    "--talkinghead-models", type=str, help="If THA3 models are not yet installed, use the given HuggingFace repository to install them.",
+    "--talkinghead-models", metavar="HFREPO",
+    type=str, help="If THA3 models are not yet installed, use the given HuggingFace repository to install them. Defaults to OktayAlpk/talking-head-anime-3.",
     default="OktayAlpk/talking-head-anime-3"
 )
 
