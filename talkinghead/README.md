@@ -59,8 +59,9 @@ With this app, you can:
 - **Graphically edit the emotion templates** used by the live mode.
   - They are JSON files, found in `talkinghead/emotions/` under your *SillyTavern-extras* folder.
     - The GUI also has a dropdown to quickload any preset.
-  - To reset an emotion back to its factory setting, replace the JSON file for that emotion with a blank file, restart the manual poser (so it loads the factory default for the missing emotion), and then save that emotion into `talkinghead/emotions/`. (This workflow may or may not be improved in the future.)
   - **NEVER** delete or modify `_defaults.json`. That file stores the factory settings, and the app will not run without it.
+  - For blunder recovery: to reset an emotion back to its factory setting, see the `--factory-reset=EMOTION` option, which will use the factory settings to overwrite the corresponding emotion preset JSON. To reset **all** emotion presets to factory settings, see `--factory-reset-all`. Careful, these operations **cannot** be undone!
+    - Currently, these options do **NOT** regenerate the example images also provided in `talkinghead/emotions/`.
 - **Batch-generate the 28 static expression sprites** for a character.
   - Input is the same single static image format as used by the live mode.
   - You can then use the generated images as the static expression sprites for your AI character. No need to run the live mode.
