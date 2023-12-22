@@ -251,13 +251,10 @@ class TalkingheadAnimator:
 
         self.current_pose = None
         self.last_blink_timestamp = None
-        self.is_blinked = False  # TODO: Maybe we might need this, too, now that the FPS is acceptable enough that we may need to blink over several frames.
-        self.targets = {"head_x_index": 0, "head_y_index": 0, "neck_z_index": 0, "body_y_index": 0, "body_z_index": 0}
-        self.progress = {"head_x_index": 0, "head_y_index": 0, "neck_z_index": 0, "body_y_index": 0, "body_z_index": 0}
-        self.direction = {"head_x_index": 1, "head_y_index": 1, "neck_z_index": 1, "body_y_index": 1, "body_z_index": 1}
-        self.originals = {"head_x_index": 0, "head_y_index": 0, "neck_z_index": 0, "body_y_index": 0, "body_z_index": 0}  # TODO: what was this for; probably for recording the values from the current emotion, before sway animation?
-        self.forward = {"head_x_index": True, "head_y_index": True, "neck_z_index": True, "body_y_index": True, "body_z_index": True}  # Direction of interpolation
-        self.start_values = {"head_x_index": 0, "head_y_index": 0, "neck_z_index": 0, "body_y_index": 0, "body_z_index": 0}
+        self.last_sway_target_timestamp = None
+        self.last_sway_target_pose = None
+        self.last_emotion = None
+        self.last_emotion_change_timestamp = None
         self.breathing_epoch = time.time_ns()
         self.breathing_cycle_length = 4.0  # seconds
 
@@ -341,60 +338,68 @@ class TalkingheadAnimator:
         new_pose[idx] = x
         return new_pose
 
-    def animate_sway(self, pose: List[float]) -> List[float]:
-        # TODO: improve sway (currently this overwrites the emotion pose, just like the original version did - but it only touched head_y)
-        #  - re-implement sway: just modify the target pose, and let the integrator (`interpolate_pose`) do the actual animation (no need to track start/progress/etc.)
-        #  - This will also make the animation nonlinear automatically. (By default, a saturating exponential toward target.
-        #    If we want a smooth start, we'll need a ramp-in mechanism to interpolate the target from the current pose to the actual target gradually.
-        #    The nonlinearity automatically takes care of slowing down when the target is approached.)
-        #  - target_pose = emotion_pose + random_offset_for_sway_morphs,
-        #  - clamp the components of the random offset to avoid extreme deformation
-        #  - but if the emotion pose is over the clamp limit, we want to still be able to reach it. So we want something like:
-        #      emotion_pose + max_random <= clamp_upper
-        #    Rearranging,
-        #      max_random <= clamp_upper - emotion_pose
-        #    Because the max should be >= 0, we modify this to
-        #      max_random = max(0, clamp_upper - emotion_pose)
-        #    This ensures the sway target pose never exceeds clamp_upper, no matter the value of the morph in emotion_pose.
-        #    When a morph in emotion_pose is over the clamp limit, sway may randomize the value down, but not up.
-        #    Similarly for min.
-        #  - Simple zeroth-order solution. Would be nicer to *gradually* decrease the max of the random range the farther emotion_pose is from the origin,
-        #    i.e. allow some small sway also to the "outside" all the way until emotion_pose is 1 (in which case the morph is at its maximum valid value).
-        #  - sway timing? How often to randomize a new target pose? Maybe every 5-10 seconds?
-        #    - Since we always know the target emotion pose, we can just re-read it and randomize new offsets.
-        #  - may also need some micro-sway on top of the sway target pose to look more believable? (small random modification every few frames,
-        #    at a small constant clamp range)
-        #  - Ideally the clamp limits and sway timing should depend on character, too...
+    def compute_sway_target_pose(self, original_target_pose: List[float]) -> List[float]:
+        """original_target_pose: emotion pose to modify with a randomized sway target
 
-        new_pose = list(pose)  # copy
-        MOVEPARTS = ["head_x_index", "head_y_index", "neck_z_index", "body_y_index", "body_z_index"]
-        for key in MOVEPARTS:
-            idx = posedict_key_to_index[key]
-            current_value = pose[idx]
+        Returns the swayed pose.
+        """
+        # We just modify the target pose, and let the integrator (`interpolate_pose`) do the actual animation.
+        # - This way we don't need to track start state, progress, etc.
+        # - This also makes the animation nonlinear automatically: a saturating exponential trajectory toward the target.
+        #     - If we want to add a smooth start, we'll need a ramp-in mechanism to interpolate the target from the current pose to the actual target gradually.
+        #       The nonlinearity automatically takes care of slowing down when the target is approached.
 
-            # Linearly interpolate between start and target values
-            new_value = self.start_values[key] + self.progress[key] * (self.targets[key] - self.start_values[key])
-            new_value = min(max(new_value, -1), 1)  # clip to bounds (just in case)
+        # TODO: Ideally `random_max` and sway timing should depend on character, too.
+        random_max = 0.6  # max sway magnitude from center position of each morph
+        noise_max = 0.02  # amount of dynamic noise (re-generated every frame), added on top of the sway target
 
-            # Check if we've reached the target or start value
-            is_close_to_target = abs(new_value - self.targets[key]) < 0.04
-            is_close_to_start = abs(new_value - self.start_values[key]) < 0.04
+        SWAYPARTS = ["head_x_index", "head_y_index", "neck_z_index", "body_y_index", "body_z_index"]
 
-            if (self.direction[key] == 1 and is_close_to_target) or (self.direction[key] == -1 and is_close_to_start):
-                # Reverse direction
-                self.direction[key] *= -1
+        def macrosway() -> List[float]:  # this handles caching and everything
+            time_now = time.time_ns()
+            should_pick_new_sway_target = True
+            if current_emotion == self.last_emotion:
+                if self.last_sway_target_timestamp is not None:  # have we created a swayed pose at least once?
+                    #  TODO: Sway timing? How often to randomize a new target pose? Maybe every 5-10 seconds?
+                    seconds_since_last_sway_target = (time_now - self.last_sway_target_timestamp) / 10**9
+                    if seconds_since_last_sway_target < 10.0 - random.uniform(0, 5):  # 5...10 seconds (TODO this is a silly approach, fix this - just randomize a new timestamp when deciding the sway pose)
+                        should_pick_new_sway_target = False
+            # else, emotion has changed, invalidating the old sway target, because it is based on the old emotion.
 
-                # If direction is now forward, set a new target and store starting value
-                if self.direction[key] == 1:
-                    self.start_values[key] = new_value
-                    self.targets[key] = current_value + random.uniform(-0.6, 0.6)
-                    self.progress[key] = 0  # Reset progress when setting a new target
+            if not should_pick_new_sway_target:
+                if self.last_sway_target_pose is not None:  # When keeping the same sway target, return the cached sway pose if we have one.
+                    return self.last_sway_target_pose
+                else:  # Should not happen, but let's be robust.
+                    return original_target_pose
+            self.last_sway_target_timestamp = time_now
 
-            # Update progress based on direction
-            self.progress[key] += 0.04 * self.direction[key]
+            new_target_pose = list(original_target_pose)  # copy
+            for key in SWAYPARTS:
+                idx = posedict_key_to_index[key]
+                target_value = original_target_pose[idx]
 
-            new_pose[idx] = new_value
-        return new_pose
+                # Determine the random range so that the swayed target always stays within `[-random_max, random_max]`, regardless of `target_value`.
+                # TODO: This is a simple zeroth-order solution that just cuts the random range.
+                #       Would be nicer to *gradually* decrease the available random range as the target value gets further from the origin.
+                random_upper = max(0, random_max - target_value)  # e.g. if target_value = 0.2, then random_upper = 0.4  => max possible = 0.6 = random_max
+                random_lower = min(0, -random_max - target_value)  # e.g. if target_value = -0.2, then random_lower = -0.4  => min possible = -0.6 = -random_max
+                random_value = random.uniform(random_lower, random_upper)
+
+                new_target_pose[idx] = target_value + random_value
+            self.last_sway_target_pose = new_target_pose
+            return new_target_pose
+
+        # Add noise to the target to make the animation look less robotic, especially once we are near the target pose.
+        def add_microsway() -> None:  # DANGER: MUTATING FUNCTION
+            for key in SWAYPARTS:
+                idx = posedict_key_to_index[key]
+                x = new_target_pose[idx] + random.uniform(-noise_max, noise_max)
+                x = max(-1.0, min(x, 1.0))  # clamp (not the manga studio)
+                new_target_pose[idx] = x
+
+        new_target_pose = macrosway()
+        add_microsway()
+        return new_target_pose
 
     def animate_breathing(self, pose: List[float]) -> List[float]:
         time_now = time.time_ns()
@@ -425,7 +430,7 @@ class TalkingheadAnimator:
         This is a kind of history-free rate-based formulation, which needs only the current and target poses, and
         the step size; there is no need to keep track of e.g. the initial pose or the progress along the trajectory.
         """
-        # NOTE: This overwrites blinking, sway, talking, and breathing, but that doesn't matter, because we apply this first.
+        # NOTE: This overwrites blinking, talking, and breathing, but that doesn't matter, because we apply this first.
         # The other animation drivers then modify our result.
         new_pose = list(pose)  # copy
         for idx, key in enumerate(posedict_keys):
@@ -461,13 +466,19 @@ class TalkingheadAnimator:
             self.current_pose = posedict_to_pose(self.emotions[current_emotion])
 
         emotion_posedict = self.emotions[current_emotion]
+        if current_emotion != self.last_emotion:  # some animation drivers need to know when the emotion last changed
+            self.last_emotion_change_timestamp = time_render_start
+
         target_pose = self.apply_emotion_to_pose(emotion_posedict, self.current_pose)
 
+        target_pose = self.compute_sway_target_pose(target_pose)
         self.current_pose = self.interpolate_pose(self.current_pose, target_pose)
         self.current_pose = self.animate_blinking(self.current_pose)
-        self.current_pose = self.animate_sway(self.current_pose)
         self.current_pose = self.animate_talking(self.current_pose)
         self.current_pose = self.animate_breathing(self.current_pose)
+
+        # Update this last so that animation drivers have access to the old emotion, too.
+        self.last_emotion = current_emotion
 
         pose = torch.tensor(self.current_pose, device=self.device, dtype=self.poser.get_dtype())
 
