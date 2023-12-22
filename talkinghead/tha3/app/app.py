@@ -6,25 +6,6 @@ This module implements the live animation backend and serves the API. For usage,
 If you want to play around with THA3 expressions in a standalone app, see `manual_poser.py`.
 """
 
-# TODO: talkinghead live mode:
-#  - Make the various hyperparameters user-configurable (ideally per character, but let's make a global version first):
-#    - Blink timing: `blink_interval` min/max
-#    - Blink probability per frame
-#    - "confusion" emotion initial segment duration (where blinking quickly in succession is allowed)
-#    - Sway timing: `sway_interval` min/max
-#    - Sway strength (`max_random`, `max_noise`)
-#    - Breathing cycle duration
-#  - Client-side bugs / missing features:
-#    - Talking animation is broken, seems the client isn't sending us a request to start/stop talking.
-#    - If `classify` is enabled, emotion state could be updated from the latest AI-generated text
-#      when switching chat files, to resume in the same state where the chat left off.
-#    - When a new talkinghead sprite is uploaded:
-#      - The preview thumbnail doesn't update
-#      - Talkinghead must be switched off and back on to actually send the new image to the backend
-#  - PNG sending efficiency? Look into encoding the stream into YUVA420 using `ffmpeg`.
-# TODO: talkinghead common:
-#   - Write new README: use case and supported features are different from the original THA3 package.
-
 import atexit
 import io
 import logging
