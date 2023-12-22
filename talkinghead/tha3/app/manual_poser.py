@@ -990,7 +990,40 @@ if __name__ == "__main__":
                         type=str,
                         help="If THA3 models are not yet installed, use the given HuggingFace repository to install them. Defaults to OktayAlpk/talking-head-anime-3.",
                         default="OktayAlpk/talking-head-anime-3")
+    parser.add_argument("--factory-reset",
+                        metavar="EMOTION",
+                        type=str,
+                        help="Overwrite the emotion preset EMOTION with its factory default, and exit. This CANNOT be undone!",
+                        default="")
+    parser.add_argument("--factory-reset-all",
+                        action="store_true",
+                        help="Overwrite ALL emotion presets with their factory defaults, and exit. This CANNOT be undone!")
     args = parser.parse_args()
+
+    # Blunder recovery options
+    if args.factory_reset_all:
+        print("Factory-resetting all emotion templates...")
+        with open(os.path.join("emotions", "_defaults.json"), "r") as json_file:
+            factory_default_emotions = json.load(json_file)
+        factory_default_emotions.pop("zero")  # not an actual emotion
+        for key in factory_default_emotions:
+            with open(os.path.join("emotions", f"{key}.json"), "w") as file:
+                json.dump({key: factory_default_emotions[key]}, file, indent=4)
+        print("Done.")
+        sys.exit(0)
+    if args.factory_reset:
+        key = args.factory_reset
+        print(f"Factory-resetting emotion template '{key}'...")
+        with open(os.path.join("emotions", "_defaults.json"), "r") as json_file:
+            factory_default_emotions = json.load(json_file)
+        factory_default_emotions.pop("zero")  # not an actual emotion
+        if key not in factory_default_emotions:
+            print(f"No such factory-defined emotion: '{key}'. Valid values: {sorted(list(factory_default_emotions.keys()))}")
+            sys.exit(1)
+        with open(os.path.join("emotions", f"{key}.json"), "w") as file:
+            json.dump({key: factory_default_emotions[key]}, file, indent=4)
+        print("Done.")
+        sys.exit(0)
 
     # Install the THA3 models if needed
     modelsdir = os.path.join(os.getcwd(), "tha3", "models")
