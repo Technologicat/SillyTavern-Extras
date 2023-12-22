@@ -430,11 +430,10 @@ class TalkingheadAnimator:
         new_pose = list(pose)  # copy
         for idx, key in enumerate(posedict_keys):
             # # We animate blinking *after* interpolating the pose, so when blinking, the eyes close instantly.
-            # # This part makes the blink also end instantly.
+            # # This part would make the blink also end instantly.
             # if key in ["eye_wink_left_index", "eye_wink_right_index"]:
             #     new_pose[idx] = target_pose[idx]
 
-            # Note this leads to an exponentially saturating behavior (1 - exp(-x)), because the delta is from the current pose to the final pose.
             delta = target_pose[idx] - pose[idx]
             new_pose[idx] = pose[idx] + step * delta
         return new_pose
