@@ -21,6 +21,7 @@ from typing import Dict, List, NoReturn, Optional, Union
 import PIL
 
 import torch
+import torchvision
 
 from flask import Flask, Response
 from flask_cors import CORS
@@ -271,6 +272,8 @@ class TalkingheadAnimator:
         self.sway_interval = None
 
         self.breathing_epoch = time.time_ns()
+
+        self.frame_no = 0
 
     def load_image(self, file_path=None) -> None:
         """Load the image file at `file_path`, and replace the current character with it.
@@ -558,11 +561,76 @@ class TalkingheadAnimator:
         pose = torch.tensor(self.current_pose, device=self.device, dtype=self.poser.get_dtype())
 
         with torch.no_grad():
-            output_image = self.poser.pose(self.source_image, pose)[0].float()  # [0]: model's output index for the full result image
-            output_image = convert_linear_to_srgb((output_image + 1.0) / 2.0)
+            # - [0]: model's output index for the full result image
+            # - model's data range is [-1, +1], linear intensity ("gamma encoded")
+            output_image = self.poser.pose(self.source_image, pose)[0].float()
+            output_image = (output_image + 1.0) / 2.0  # -> [0, 1]
 
             c, h, w = output_image.shape
-            output_image = (255.0 * torch.transpose(output_image.reshape(c, h * w), 0, 1)).reshape(h, w, c).byte()
+
+            # --------------------------------------------------------------------------------
+            # Postproc filters (TODO: refactor, and make configurable)
+
+            def apply_bloom(image: torch.tensor, luma_threshold: float = 0.8, hdr_exposure: float = 0.7) -> None:
+                """Bloom effect (lighting bleed, fake HDR). Popular in early 2000s anime."""
+                # There are tutorials on the net, see e.g.:
+                #   https://learnopengl.com/Advanced-Lighting/Bloom
+
+                # Find the bright parts.
+                Y = 0.2126 * image[0, :, :] + 0.7152 * image[1, :, :] + 0.0722 * image[2, :, :]  # HDTV luminance
+                mask = torch.ge(Y, luma_threshold)  # [h, w]
+
+                # Make a copy of the image with just the bright parts.
+                mask = torch.unsqueeze(mask, 0)  # -> [1, h, w]
+                brights = image * mask  # [c, h, w]
+
+                # Blur the bright parts. Two-pass blur to save compute.
+                # It seems that in Torch, one large 1D blur is faster than looping with a smaller one.
+                brights = torchvision.transforms.GaussianBlur((21, 1), sigma=7.0)(brights)
+                brights = torchvision.transforms.GaussianBlur((1, 21), sigma=7.0)(brights)
+
+                # Additively blend the images.
+                image.add_(brights)
+
+                # We now have a fake HDR image. Tonemap it back to LDR.
+                image[:3, :, :] = 1.0 - torch.exp(-image[:3, :, :] * hdr_exposure)  # RGB: tonemap
+                image[3, :, :] = torch.maximum(image[3, :, :], brights[3, :, :])  # alpha: max-combine
+                torch.clamp_(image, min=0.0, max=1.0)
+
+            def apply_scanlines(image: torch.tensor, field: int = 0, dynamic: bool = True) -> None:
+                """CRT TV like scanlines.
+
+                `field`: Which CRT field is bright at the first frame. 0 = top, 1 = bottom.
+                `dynamic`: If `True`, the field will alternate each frame (top, bottom, top, bottom, ...)
+                           for a more authentic CRT look (like Phosphor deinterlacer in VLC).
+                """
+                image[3, (self.frame_no % 2)::2, :].mul_(0.5)  # TODO: should ideally modify just Y channel in YUV space
+                self.frame_no = (self.frame_no + 1) % 2
+
+            def apply_alphanoise(image: torch.tensor, magnitude: float = 0.1) -> None:
+                """Dynamic noise to alpha channel."""
+                base_magnitude = 1.0 - magnitude
+                image[3, :, :].mul_(base_magnitude + magnitude * torch.rand(h, w, device=self.device))
+
+            def apply_translucency(image: torch.tensor, alpha: float = 0.9) -> None:
+                """Translucency for hologram look."""
+                image[3, :, :].mul_(alpha)
+
+            # apply postprocess chain
+            apply_bloom(output_image)
+            apply_scanlines(output_image)
+            apply_alphanoise(output_image)
+            apply_translucency(output_image)
+
+            # end postproc filters
+            # --------------------------------------------------------------------------------
+
+            output_image = convert_linear_to_srgb(output_image)  # apply gamma correction
+
+            # convert [c, h, w] float -> [h, w, c] uint8
+            output_image = torch.transpose(output_image.reshape(c, h * w), 0, 1).reshape(h, w, c)
+            output_image = (255.0 * output_image).byte()
+
             output_image_numpy = output_image.detach().cpu().numpy()
 
         # Update FPS counter, measuring animation frame render time only.
