@@ -273,7 +273,7 @@ class TalkingheadAnimator:
 
         self.breathing_epoch = time.time_ns()
 
-        self.frame_no = 0
+        self.frame_evenodd = 0
 
     def load_image(self, file_path=None) -> None:
         """Load the image file at `file_path`, and replace the current character with it.
@@ -600,12 +600,16 @@ class TalkingheadAnimator:
             def apply_scanlines(image: torch.tensor, field: int = 0, dynamic: bool = True) -> None:
                 """CRT TV like scanlines.
 
-                `field`: Which CRT field is bright at the first frame. 0 = top, 1 = bottom.
-                `dynamic`: If `True`, the field will alternate each frame (top, bottom, top, bottom, ...)
+                `field`: Which CRT field is dimmed at the first frame. 0 = top, 1 = bottom.
+                `dynamic`: If `True`, the dimmed field will alternate each frame (top, bottom, top, bottom, ...)
                            for a more authentic CRT look (like Phosphor deinterlacer in VLC).
                 """
-                image[3, (self.frame_no % 2)::2, :].mul_(0.5)  # TODO: should ideally modify just Y channel in YUV space
-                self.frame_no = (self.frame_no + 1) % 2
+                if dynamic:
+                    start = (field + self.frame_evenodd) % 2
+                else:
+                    start = field
+                image[3, start::2, :].mul_(0.5)  # TODO: should ideally modify just Y channel in YUV space
+                self.frame_evenodd = (self.frame_evenodd + 1) % 2
 
             def apply_alphanoise(image: torch.tensor, magnitude: float = 0.1) -> None:
                 """Dynamic noise to alpha channel."""
