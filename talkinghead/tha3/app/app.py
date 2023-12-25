@@ -589,7 +589,7 @@ class TalkingheadAnimator:
                 brights = torchvision.transforms.GaussianBlur((21, 1), sigma=7.0)(brights)
                 brights = torchvision.transforms.GaussianBlur((1, 21), sigma=7.0)(brights)
 
-                # Additively blend the images.
+                # Additively blend the images (note we are working in linear intensity space).
                 image.add_(brights)
 
                 # We now have a fake HDR image. Tonemap it back to LDR.
