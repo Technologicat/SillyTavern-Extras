@@ -564,7 +564,9 @@ class TalkingheadAnimator:
             # - [0]: model's output index for the full result image
             # - model's data range is [-1, +1], linear intensity ("gamma encoded")
             output_image = self.poser.pose(self.source_image, pose)[0].float()
-            output_image = (output_image + 1.0) / 2.0  # -> [0, 1]
+            # output_image = (output_image + 1.0) / 2.0  # -> [0, 1]
+            output_image.add_(1.0)
+            output_image.mul_(0.5)
 
             c, h, w = output_image.shape
 
